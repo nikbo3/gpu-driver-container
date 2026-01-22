@@ -408,17 +408,15 @@ _install_driver() {
     ../mkprecompiled --unpack ${archive_dir}/${pkg_name} -o ${staging_dir}
     cp ${archive_dir}/*.mod.o ${staging_dir}
 
-    # Re-link the modules by using the binutils we archived from the development 
-    # environment.
-    local old_ld_path=$LD_LIBRARY_PATH
-    export LD_LIBRARY_PATH=${NVIDIA_BINUITLS_DIR}/libs:$LD_LIBRARY_PATH
+    # Re-link the modules using the host system's ld to avoid GLIBC version mismatches
+    # The bundled binutils from the developer container may require newer GLIBC than the host
     cd ${staging_dir}
     cp ../../nvidia/nv-kernel.o_binary .
     cp ../../nvidia-modeset/nv-modeset-kernel.o_binary .
     echo "Re-linking NVIDIA driver kernel modules..."
-    ${NVIDIA_BINUITLS_DIR}/bin/ld -d -r -T ${base_dir}/module.lds -o nvidia.ko ./nv-linux.o ./nv-kernel.o_binary ./nvidia.mod.o
-    ${NVIDIA_BINUITLS_DIR}/bin/ld -d -r -T ${base_dir}/module.lds -o nvidia-modeset.ko ./nv-modeset-linux.o ./nv-modeset-kernel.o_binary nvidia-modeset.mod.o
-    export LD_LIBRARY_PATH=${old_ld_path}
+    # Use host system's ld instead of bundled one
+    /usr/bin/ld -d -r -T ${base_dir}/module.lds -o nvidia.ko ./nv-linux.o ./nv-kernel.o_binary ./nvidia.mod.o
+    /usr/bin/ld -d -r -T ${base_dir}/module.lds -o nvidia-modeset.ko ./nv-modeset-linux.o ./nv-modeset-kernel.o_binary nvidia-modeset.mod.o
     
 
     # Copy the kernel modules to their final destination and generate the module dependencies
