@@ -166,11 +166,28 @@ mkdir -p /usr/src/linux/proc
 cp /proc/version /usr/src/linux/proc/
 
 echo "Compiling NVIDIA driver kernel modules with $(gcc --version | head -1)..."
-cp /lib/modules/${KERNEL_VERSION}/build/scripts/module.lds /usr/src/nvidia-*/kernel
-cd /usr/src/nvidia-*/kernel
+
+# Copy module.lds if it exists (not present in all kernel versions)
+if [ -f /lib/modules/${KERNEL_VERSION}/build/scripts/module.lds ]; then
+    cp /lib/modules/${KERNEL_VERSION}/build/scripts/module.lds /usr/src/nvidia-*/kernel
+else
+    echo "Note: module.lds not found, continuing without it..."
+fi
+
+cd /usr/src/nvidia-*/kernel || {
+    echo "ERROR: NVIDIA kernel directory not found!"
+    ls -la /usr/src/
+    exit 1
+}
+
 export IGNORE_CC_MISMATCH=1
 export IGNORE_MISSING_MODULE_SYMVERS=1
-make -s -j ${MAX_THREADS} SYSSRC=/lib/modules/${KERNEL_VERSION}/source nv-linux.o nv-modeset-linux.o > /dev/null
+
+# Make compilation visible (remove -s and /dev/null redirect)
+echo "Running make for nv-linux.o and nv-modeset-linux.o..."
+make -j ${MAX_THREADS} SYSSRC=/lib/modules/${KERNEL_VERSION}/source nv-linux.o nv-modeset-linux.o
+
+echo "Compilation completed successfully!"
 EOF
     mkdir -p /lib/modules/${KERNEL_VERSION}
     cp -r /mnt/coreos/lib/modules/${KERNEL_VERSION}/* /lib/modules/${KERNEL_VERSION}/

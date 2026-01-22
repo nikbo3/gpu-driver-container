@@ -17,28 +17,58 @@ This document summarizes all changes made to the `nikbo3/gpu-driver-container` f
 
 ### 2. `nvidia-driver` (script)
 
-**Changes:**
-- ✅ Added `e2fsck -fy` before `resize2fs` to check/repair filesystem
-- ✅ Added `resize2fs -f` (force flag) to handle newer ext4 features
-- ✅ Implemented retry logic if resize fails
-- ✅ Added logging messages for better debugging
+**Critical Changes:**
+- ✅ **Fixed loop device management** - Auto-select available loop device with `losetup --find`
+- ✅ **Added stale loop cleanup** - Detach existing loop devices on start
+- ✅ **Skipped e2fsck** - Bypass FEATURE_C12 incompatibility (use `resize2fs -f` only)
+- ✅ **Separated loop setup from mount** - Use `losetup` independently for proper filesystem ops
+- ✅ **Expanded image before loop setup** - Add 3GB space with `dd` before `losetup`
+- ✅ **Made module.lds optional** - Handle kernels without this file gracefully
+- ✅ **Made compilation visible** - Removed `-s` and `/dev/null` to show build output
+- ✅ **Added error checking** - Verify NVIDIA directory exists before compilation
+- ✅ **Added progress messages** - Better visibility into compilation steps
 
-**Why:** Flatcar 6.12.58 uses newer ext4 filesystem features that cause `resize2fs` to fail without preliminary filesystem check.
+**Why:** 
+1. Flatcar 6.12.58 uses newer ext4 filesystem features (FEATURE_C12/orphan_file)
+2. Old e2fsprogs (1.46.5) doesn't support these features
+3. Loop device can become busy/invalid if not managed properly
+4. Compilation was failing silently inside chroot
 
-**Code added:**
+**Key code sections:**
+
+**Loop Device Management:**
 ```bash
-# For Flatcar 6.12+ with newer ext4 filesystem features
-echo "Checking filesystem before resize..."
-e2fsck -fy ${loop_dev} || {
-    echo "Warning: e2fsck reported issues, but continuing..."
-    true
-}
+# Auto-select available loop device
+loop_dev=$(_exec losetup --find --show -o ${offset_limit} "${dev_image}")
 
-echo "Resizing filesystem..."
-resize2fs -f ${loop_dev} || {
-    echo "Warning: resize2fs failed, attempting repair and retry..."
-    e2fsck -fy ${loop_dev} && resize2fs -f ${loop_dev}
+# Cleanup stale loop devices
+_cleanup_loop_devices() {
+    local image_file="$1"
+    for dev in $(losetup -a | grep "${image_file}" | awk -F':' '{print $1}'); do
+        _exec losetup -d "${dev}" || true
+    done
 }
+```
+
+**Filesystem Resize (simplified):**
+```bash
+# Skip e2fsck due to FEATURE_C12 incompatibility
+echo "Resizing filesystem (without e2fsck due to version incompatibility)..."
+resize2fs -f ${loop_dev}
+```
+
+**Compilation Visibility:**
+```bash
+# Make module.lds optional
+if [ -f /lib/modules/${KERNEL_VERSION}/build/scripts/module.lds ]; then
+    cp /lib/modules/${KERNEL_VERSION}/build/scripts/module.lds /usr/src/nvidia-*/kernel
+else
+    echo "Note: module.lds not found, continuing without it..."
+fi
+
+# Make compilation visible (removed -s and /dev/null redirect)
+make -j ${MAX_THREADS} SYSSRC=/lib/modules/${KERNEL_VERSION}/source nv-linux.o nv-modeset-linux.o
+echo "Compilation completed successfully!"
 ```
 
 ---
