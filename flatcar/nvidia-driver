@@ -50,8 +50,13 @@ _install_development_env() {
     losetup -c ${loop_dev}
     
     # For Flatcar 6.12+ with newer ext4 filesystem features, we need to:
-    # 1. Check/repair the filesystem first with e2fsck
-    # 2. Use resize2fs with force flag to handle newer ext4 features
+    # 1. UNMOUNT the filesystem first (can't run e2fsck on mounted fs)
+    # 2. Check/repair the filesystem with e2fsck
+    # 3. Resize with resize2fs (force flag for newer ext4 features)
+    # 4. REMOUNT the filesystem
+    echo "Unmounting filesystem for resize operations..."
+    _exec umount /mnt/coreos
+    
     echo "Checking filesystem before resize..."
     e2fsck -fy ${loop_dev} || {
         echo "Warning: e2fsck reported issues, but continuing..."
@@ -63,6 +68,9 @@ _install_development_env() {
         echo "Warning: resize2fs failed, attempting repair and retry..."
         e2fsck -fy ${loop_dev} && resize2fs -f ${loop_dev}
     }
+    
+    echo "Remounting filesystem..."
+    _exec mount -o loop=${loop_dev},offset=${offset_limit} ${dev_image} /mnt/coreos
 
     # Version.txt contains some pre-defined environment variables 
     # that we will use when building the kernel modules
