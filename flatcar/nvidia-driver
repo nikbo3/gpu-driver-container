@@ -48,7 +48,21 @@ _install_development_env() {
     mount_path=$(losetup --list --noheadings -O BACK-FILE "${loop_dev}")
     dd if=/dev/zero bs=1MiB of="${mount_path}" conv=notrunc oflag=append count=3000
     losetup -c ${loop_dev}
-    resize2fs ${loop_dev}
+    
+    # For Flatcar 6.12+ with newer ext4 filesystem features, we need to:
+    # 1. Check/repair the filesystem first with e2fsck
+    # 2. Use resize2fs with force flag to handle newer ext4 features
+    echo "Checking filesystem before resize..."
+    e2fsck -fy ${loop_dev} || {
+        echo "Warning: e2fsck reported issues, but continuing..."
+        true
+    }
+    
+    echo "Resizing filesystem..."
+    resize2fs -f ${loop_dev} || {
+        echo "Warning: resize2fs failed, attempting repair and retry..."
+        e2fsck -fy ${loop_dev} && resize2fs -f ${loop_dev}
+    }
 
     # Version.txt contains some pre-defined environment variables 
     # that we will use when building the kernel modules

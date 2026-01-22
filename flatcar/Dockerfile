@@ -13,6 +13,7 @@ RUN dpkg --add-architecture i386 && \
         build-essential \
         ca-certificates \
         curl \
+        e2fsprogs \
         gnupg2 \
         jq \
         kmod \
@@ -34,7 +35,9 @@ RUN curl -fsSL -o /usr/local/bin/donkey https://github.com/3XX0/donkey/releases/
 
 #ARG BASE_URL=http://us.download.nvidia.com/XFree86/Linux-x86_64
 ARG BASE_URL=https://us.download.nvidia.com/tesla
-ARG DRIVER_VERSION=460.32.03
+# Updated default driver version for Flatcar 6.12.58+ compatibility
+# Driver 550.x series supports newer kernels (6.12+)
+ARG DRIVER_VERSION=550.127.05
 ENV DRIVER_VERSION=$DRIVER_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 

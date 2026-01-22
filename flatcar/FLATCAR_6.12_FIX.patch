@@ -1,0 +1,19 @@
+--- nvidia-driver.orig	2025-01-22 00:00:00.000000000 +0000
++++ nvidia-driver	2025-01-22 00:00:00.000000000 +0000
+@@ -137,7 +137,13 @@
+     mount_path=$(losetup --list --noheadings -O BACK-FILE "${loop_dev}")
+     dd if=/dev/zero bs=1MiB of="${mount_path}" conv=notrunc oflag=append count=3000
+     losetup -c ${loop_dev}
+-    resize2fs ${loop_dev}
++    
++    # For newer Flatcar versions (6.12+), need to handle newer ext4 features
++    # First check/repair filesystem, then resize
++    e2fsck -fy ${loop_dev} || true
++    resize2fs -f ${loop_dev} || {
++        echo "Warning: resize2fs failed, attempting with force flag after fsck"
++        e2fsck -fy ${loop_dev} && resize2fs -f ${loop_dev}
++    }
+ 
+     # Version.txt contains some pre-defined environment variables 
+     # that we will use when building the kernel modules
+
