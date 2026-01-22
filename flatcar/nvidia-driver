@@ -139,6 +139,7 @@ _install_prerequisites() (
     echo "Installing the Flatcar kernel sources into the development environment..."
 
     cat <<'EOF' | chroot /mnt/coreos /bin/bash
+set -x  # Enable debug output
 KERNEL_VERSION=$(cat /usr/src/linux/include/config/kernel.release || ls /lib/modules)
 KERNEL_STRING=$(echo "${KERNEL_VERSION}" | cut -d "-" -f1)
 echo "Installing kernel sources for kernel version ${KERNEL_VERSION}..."
@@ -165,29 +166,41 @@ depmod ${KERNEL_VERSION}
 mkdir -p /usr/src/linux/proc
 cp /proc/version /usr/src/linux/proc/
 
-echo "Compiling NVIDIA driver kernel modules with $(gcc --version | head -1)..."
+echo "=== DEBUG: About to start compilation phase ==="
+echo "=== Checking NVIDIA sources ==="
+ls -la /usr/src/ || echo "Failed to list /usr/src/"
+ls -la /usr/src/nvidia-*/kernel 2>/dev/null || echo "NVIDIA kernel directory not found"
+
+echo "=== Compiling NVIDIA driver kernel modules with $(gcc --version | head -1) ==="
 
 # Copy module.lds if it exists (not present in all kernel versions)
 if [ -f /lib/modules/${KERNEL_VERSION}/build/scripts/module.lds ]; then
+    echo "Copying module.lds..."
     cp /lib/modules/${KERNEL_VERSION}/build/scripts/module.lds /usr/src/nvidia-*/kernel
 else
     echo "Note: module.lds not found, continuing without it..."
 fi
 
+echo "Changing to NVIDIA kernel directory..."
 cd /usr/src/nvidia-*/kernel || {
-    echo "ERROR: NVIDIA kernel directory not found!"
-    ls -la /usr/src/
+    echo "ERROR: Failed to cd to NVIDIA kernel directory!"
     exit 1
 }
+
+echo "Current directory: $(pwd)"
+echo "Files in directory:"
+ls -la
 
 export IGNORE_CC_MISMATCH=1
 export IGNORE_MISSING_MODULE_SYMVERS=1
 
-# Make compilation visible (remove -s and /dev/null redirect)
-echo "Running make for nv-linux.o and nv-modeset-linux.o..."
-make -j ${MAX_THREADS} SYSSRC=/lib/modules/${KERNEL_VERSION}/source nv-linux.o nv-modeset-linux.o
+echo "=== Starting make command ==="
+make -j ${MAX_THREADS} SYSSRC=/lib/modules/${KERNEL_VERSION}/source nv-linux.o nv-modeset-linux.o || {
+    echo "ERROR: Compilation failed!"
+    exit 1
+}
 
-echo "Compilation completed successfully!"
+echo "=== Compilation completed successfully! ==="
 EOF
     mkdir -p /lib/modules/${KERNEL_VERSION}
     cp -r /mnt/coreos/lib/modules/${KERNEL_VERSION}/* /lib/modules/${KERNEL_VERSION}/
