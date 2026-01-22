@@ -160,7 +160,12 @@ emerge -gKq coreos-sources \
 rm -f /usr/src/linux
 ln -s /usr/src/linux-${KERNEL_STRING}-coreos /usr/src/linux
 cp /lib/modules/${KERNEL_VERSION}/build/.config /usr/src/linux
-make -C /usr/src/linux modules_prepare > /dev/null
+echo "=== Running modules_prepare (this may take a moment) ==="
+make -C /usr/src/linux modules_prepare || {
+    echo "ERROR: modules_prepare failed with exit code $?"
+    exit 1
+}
+echo "=== modules_prepare completed successfully ==="
 cp /lib/modules/${KERNEL_VERSION}/build/Module.symvers /usr/src/linux/
 depmod ${KERNEL_VERSION}
 mkdir -p /usr/src/linux/proc
