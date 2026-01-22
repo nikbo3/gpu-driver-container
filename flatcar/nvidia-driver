@@ -40,18 +40,27 @@ _install_development_env() {
     local offset_limit=$((sector_start * sector_size))
 
     mkdir -p /mnt/coreos
-    local loop_dev="/dev/loop7"
     
     # For Flatcar 6.12+: Set up loop device first, expand, then mount
     # This allows running e2fsck/resize2fs on unmounted device
+    
+    # Step 0: Clean up any stale loop devices from previous failed runs
+    echo "Cleaning up any existing loop devices for this image..."
+    for loop in $(losetup -j "${dev_image}" 2>/dev/null | cut -d: -f1); do
+        echo "Detaching stale loop device: ${loop}"
+        losetup -d "${loop}" 2>/dev/null || true
+    done
     
     # Step 1: Add space to the image file BEFORE setting up loop device
     echo "Adding space to development image..."
     dd if=/dev/zero bs=1MiB of="${dev_image}" conv=notrunc oflag=append count=3000
     
     # Step 2: Set up loop device with offset (but don't mount yet)
+    # Use --find to automatically get an available loop device instead of hardcoding loop7
     echo "Setting up loop device with offset..."
-    losetup -o ${offset_limit} ${loop_dev} ${dev_image}
+    local loop_dev
+    loop_dev=$(losetup --find --show -o ${offset_limit} ${dev_image})
+    echo "Using loop device: ${loop_dev}"
     
     # Step 3: Resize the filesystem
     # Note: Skipping e2fsck because Flatcar 6.12.58 uses FEATURE_C12 (orphan_file)
@@ -96,9 +105,19 @@ _install_development_env() {
 
 _cleanup_development_env() {
     echo "Cleaning up the development environment..."
-    _exec umount -l /mnt/coreos
+    _exec umount -l /mnt/coreos || true
+    
+    # Detach any loop devices associated with the flatcar developer container
+    local dev_image="/usr/src/nvidia-${DRIVER_VERSION}/flatcar_developer_container.bin"
+    if [ -f "${dev_image}" ]; then
+        for loop in $(losetup -j "${dev_image}" | cut -d: -f1); do
+            echo "Detaching loop device: ${loop}"
+            losetup -d "${loop}" 2>/dev/null || true
+        done
+    fi
+    
     rm -rf /mnt/coreos
-    rm -f "/usr/src/nvidia-${DRIVER_VERSION}/flatcar_developer_container.bin"
+    rm -f "${dev_image}"
 }
 
 # Install the kernel modules header/builtin/order files and generate the kernel version string.
