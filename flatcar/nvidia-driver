@@ -41,36 +41,35 @@ _install_development_env() {
 
     mkdir -p /mnt/coreos
     local loop_dev="/dev/loop7"
-    _exec mount -o loop=${loop_dev},offset=${offset_limit} ${dev_image} /mnt/coreos
-
-    # add more space to the device
-    local mount_path
-    mount_path=$(losetup --list --noheadings -O BACK-FILE "${loop_dev}")
-    dd if=/dev/zero bs=1MiB of="${mount_path}" conv=notrunc oflag=append count=3000
-    losetup -c ${loop_dev}
     
-    # For Flatcar 6.12+ with newer ext4 filesystem features, we need to:
-    # 1. UNMOUNT the filesystem first (can't run e2fsck on mounted fs)
-    # 2. Check/repair the filesystem with e2fsck
-    # 3. Resize with resize2fs (force flag for newer ext4 features)
-    # 4. REMOUNT the filesystem
-    echo "Unmounting filesystem for resize operations..."
-    _exec umount /mnt/coreos
+    # For Flatcar 6.12+: Set up loop device first, expand, then mount
+    # This allows running e2fsck/resize2fs on unmounted device
     
+    # Step 1: Add space to the image file BEFORE setting up loop device
+    echo "Adding space to development image..."
+    dd if=/dev/zero bs=1MiB of="${dev_image}" conv=notrunc oflag=append count=3000
+    
+    # Step 2: Set up loop device with offset (but don't mount yet)
+    echo "Setting up loop device with offset..."
+    losetup -o ${offset_limit} ${loop_dev} ${dev_image}
+    
+    # Step 3: Run e2fsck on the unmounted loop device
     echo "Checking filesystem before resize..."
     e2fsck -fy ${loop_dev} || {
         echo "Warning: e2fsck reported issues, but continuing..."
         true
     }
     
+    # Step 4: Resize the filesystem
     echo "Resizing filesystem..."
     resize2fs -f ${loop_dev} || {
         echo "Warning: resize2fs failed, attempting repair and retry..."
         e2fsck -fy ${loop_dev} && resize2fs -f ${loop_dev}
     }
     
-    echo "Remounting filesystem..."
-    _exec mount -o loop=${loop_dev},offset=${offset_limit} ${dev_image} /mnt/coreos
+    # Step 5: Now mount the resized filesystem
+    echo "Mounting development environment..."
+    _exec mount ${loop_dev} /mnt/coreos
 
     # Version.txt contains some pre-defined environment variables 
     # that we will use when building the kernel modules
