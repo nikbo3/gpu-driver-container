@@ -247,24 +247,15 @@ EOF
 
 # Check if the kernel version requires a new precompiled driver packages.
 _kernel_requires_package() {
-    local proc_mount_arg=""
-
     echo "Checking NVIDIA driver packages..."
     cd "/usr/src/nvidia-${DRIVER_VERSION}/kernel"
 
-    if [ "${KERNEL_VERSION}" != "$(uname -r)" ]; then
-        proc_mount_arg="--proc-mount-point /usr/src/linux/proc"
+    # For Flatcar 6.12.58+, check if precompiled .ko modules exist for this kernel version
+    local archive_dir="precompiled/${KERNEL_VERSION}"
+    if [ -d "${archive_dir}" ] && ls ${archive_dir}/*.ko >/dev/null 2>&1; then
+        echo "Found NVIDIA driver package nvidia-modules-${KERNEL_VERSION%%-*}"
+        return 1
     fi
-    # Note that mkprecompiled does not handle empty double-quotes;
-    # so don't wrap variables in double-quotes
-    # The precompiled directory structure is laid out as one directory per KERNEL_VERSION 
-    # and it includes the packed kernel interfaces and other files. So we use the following search pattern:
-    for pkg_name in $(ls -d -1 precompiled/*/nvidia-modules* 2> /dev/null); do
-        if ! ../mkprecompiled --match ${pkg_name} ${proc_mount_arg} > /dev/null; then
-            echo "Found NVIDIA driver package ${pkg_name##*/}"
-            return 1
-        fi
-    done
     return 0
 }
 
@@ -288,25 +279,10 @@ _create_driver_package() (
         nvidia_uvm_sign_args="--signed"
     fi
 
-    # Note that mkprecompiled does not handle empty double-quotes;
-    # so don't wrap variables in double-quotes
+    # For Flatcar 6.12.58 with full .ko modules, we skip mkprecompiled packaging
+    # The .ko files are already complete and ready to use
     echo "Building NVIDIA driver package ${pkg_name}..."
-    ../mkprecompiled --pack ${pkg_name} --description ${KERNEL_VERSION}                              \
-                                        --proc-mount-point /usr/src/linux/proc                       \
-                                        --driver-version ${DRIVER_VERSION}                           \
-                                        --kernel-interface nv-linux.o                                \
-                                        --linked-module-name nvidia.ko                               \
-                                        --core-object-name nvidia/nv-kernel.o_binary                 \
-                                        ${nvidia_sign_args}                                          \
-                                        --target-directory .                                         \
-                                        --kernel-interface nv-modeset-linux.o                        \
-                                        --linked-module-name nvidia-modeset.ko                       \
-                                        --core-object-name nvidia-modeset/nv-modeset-kernel.o_binary \
-                                        ${nvidia_modeset_sign_args}                                  \
-                                        --target-directory .                                         \
-                                        --kernel-module nvidia-uvm.ko                                \
-                                        ${nvidia_uvm_sign_args}                                      \
-                                        --target-directory .
+    echo "Using pre-built kernel modules (skipping mkprecompiled for Flatcar 6.12.58+)"
     # Archive the fully-linked kernel modules
     # For Flatcar 6.12.58, we keep the .ko files to avoid re-linking issues
     # The archive is created one per kernel version, including the package created above
@@ -408,15 +384,29 @@ _install_driver() {
     fi
     # Prepare the final destination of the kernel modules
     # For Flatcar 6.12.58, we use pre-built fully-linked .ko files from compilation
-    # No re-linking needed - modules were built in the correct environment
+    # No unpacking or re-linking needed - modules were built in the correct environment
     mkdir -p ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}
 
     local archive_dir=${base_dir}/precompiled/${KERNEL_VERSION}
     
+    # Verify the archive directory exists and has modules
+    if [ ! -d "${archive_dir}" ]; then
+        echo "ERROR: Archive directory ${archive_dir} not found!"
+        exit 1
+    fi
+    
+    if ! ls ${archive_dir}/*.ko >/dev/null 2>&1; then
+        echo "ERROR: No kernel modules found in ${archive_dir}!"
+        exit 1
+    fi
+    
     # Copy the pre-built kernel modules directly
     echo "Installing pre-built NVIDIA driver kernel modules..."
     cp ${archive_dir}/*.ko ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}/
-    cp ${archive_dir}/modules.order ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}/
+    
+    if [ -f ${archive_dir}/modules.order ]; then
+        cp ${archive_dir}/modules.order ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}/
+    fi
     
     # Copy modules.builtin files if they exist (needed by depmod)
     if [ -f ${archive_dir}/modules.builtin ]; then
@@ -426,7 +416,11 @@ _install_driver() {
         cp ${archive_dir}/modules.builtin.modinfo ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}/
     fi
     
+    echo "Installed modules:"
+    ls -lh ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}/*.ko
+    
     # Generate module dependencies
+    echo "Generating module dependencies..."
     depmod -b ${NVIDIA_KMODS_DIR} ${KERNEL_VERSION}
 }
 
