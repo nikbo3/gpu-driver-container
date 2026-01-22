@@ -32,7 +32,27 @@ _install_development_env() {
     local dev_image="flatcar_developer_container.bin"
     local dev_image_url="https://${COREOS_RELEASE_CHANNEL}.release.flatcar-linux.net/${COREOS_RELEASE_BOARD}/${latest_release}/${dev_image}.bz2"
 
-    curl -Ls "${dev_image_url}" | bzip2 -dq > "${dev_image}"
+    # Clean up any stale loop devices from previous failed runs
+    echo "Cleaning up any existing loop devices for this image..."
+    for loop in $(losetup -j "${dev_image}" 2>/dev/null | cut -d: -f1); do
+        echo "Detaching stale loop device: ${loop}"
+        losetup -d "${loop}" 2>/dev/null || true
+    done
+
+    echo "Downloading Flatcar development image from ${dev_image_url}..."
+    if ! curl -Lsf "${dev_image_url}" | bzip2 -dq > "${dev_image}"; then
+        echo "ERROR: Failed to download Flatcar development image!"
+        echo "URL: ${dev_image_url}"
+        exit 1
+    fi
+    
+    if [ ! -f "${dev_image}" ] || [ ! -s "${dev_image}" ]; then
+        echo "ERROR: Development image file is missing or empty!"
+        ls -lh "${dev_image}" 2>/dev/null || echo "File does not exist"
+        exit 1
+    fi
+    
+    echo "Development image downloaded successfully ($(du -h ${dev_image} | cut -f1))"
     local sector_size
     sector_size=$(fdisk -l "${dev_image}" | grep "^Sector size" | awk '{ print $4 }')
     local sector_start
