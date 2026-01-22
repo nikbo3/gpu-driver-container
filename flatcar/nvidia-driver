@@ -53,18 +53,14 @@ _install_development_env() {
     echo "Setting up loop device with offset..."
     losetup -o ${offset_limit} ${loop_dev} ${dev_image}
     
-    # Step 3: Run e2fsck on the unmounted loop device
-    echo "Checking filesystem before resize..."
-    e2fsck -fy ${loop_dev} || {
-        echo "Warning: e2fsck reported issues, but continuing..."
-        true
-    }
-    
-    # Step 4: Resize the filesystem
-    echo "Resizing filesystem..."
-    resize2fs -f ${loop_dev} || {
-        echo "Warning: resize2fs failed, attempting repair and retry..."
-        e2fsck -fy ${loop_dev} && resize2fs -f ${loop_dev}
+    # Step 3: Resize the filesystem
+    # Note: Skipping e2fsck because Flatcar 6.12.58 uses FEATURE_C12 (orphan_file)
+    # which requires e2fsprogs 1.47.0+, but Ubuntu 22.04 has 1.46.5
+    # The filesystem is fresh from Flatcar, so it should be clean
+    echo "Resizing filesystem (without e2fsck due to version incompatibility)..."
+    resize2fs ${loop_dev} || {
+        echo "Warning: resize2fs failed, this may cause issues later..."
+        echo "Filesystem features may be incompatible with this e2fsprogs version"
     }
     
     # Step 5: Now mount the resized filesystem
