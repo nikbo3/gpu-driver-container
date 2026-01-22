@@ -229,8 +229,9 @@ ls -la
 export IGNORE_CC_MISMATCH=1
 export IGNORE_MISSING_MODULE_SYMVERS=1
 
-echo "=== Starting make command ==="
-make -j ${MAX_THREADS} SYSSRC=/lib/modules/${KERNEL_VERSION}/source nv-linux.o nv-modeset-linux.o || {
+echo "=== Starting make command (building full kernel modules) ==="
+# Build full .ko modules, not just .o files, to avoid re-linking issues later
+make -j ${MAX_THREADS} SYSSRC=/lib/modules/${KERNEL_VERSION}/source modules || {
     echo "ERROR: Compilation failed!"
     exit 1
 }
@@ -306,19 +307,31 @@ _create_driver_package() (
                                         --kernel-module nvidia-uvm.ko                                \
                                         ${nvidia_uvm_sign_args}                                      \
                                         --target-directory .
-    # Archive the module files, so we can re-link later
+    # Archive the fully-linked kernel modules
+    # For Flatcar 6.12.58, we keep the .ko files to avoid re-linking issues
     # The archive is created one per kernel version, including the package created above
-    # and the corresponding module files. 
-    # Finally, delete any linked kernel modules (.ko) as they cannot be part of the container image
+    # and the corresponding module files
     local archive_dir=precompiled/${KERNEL_VERSION}
     mkdir -p "${archive_dir}"
     mv "${pkg_name}" "${archive_dir}"
     local kmods="nvidia nvidia-uvm nvidia-modeset nvidia-drm"
-    for m in $kmods; do 
-       cp ${m}.mod.o "${archive_dir}"
-       rm -f ${m}.ko
+    for m in $kmods; do
+       # Keep both .ko and .mod.o files
+       if [ -f ${m}.ko ]; then
+           cp ${m}.ko "${archive_dir}/"
+       fi
+       if [ -f ${m}.mod.o ]; then
+           cp ${m}.mod.o "${archive_dir}/"
+       fi
     done
-    cp modules.order "${archive_dir}"
+    cp modules.order "${archive_dir}/"
+    # Also copy modules.builtin if it exists (needed by depmod)
+    if [ -f /lib/modules/${KERNEL_VERSION}/modules.builtin ]; then
+        cp /lib/modules/${KERNEL_VERSION}/modules.builtin "${archive_dir}/"
+    fi
+    if [ -f /lib/modules/${KERNEL_VERSION}/modules.builtin.modinfo ]; then
+        cp /lib/modules/${KERNEL_VERSION}/modules.builtin.modinfo "${archive_dir}/"
+    fi
     echo "Packaged precompiled driver into $PWD/${archive_dir}"
 )
 
@@ -393,35 +406,27 @@ _install_driver() {
     if [ "${ACCEPT_LICENSE}" = "yes" ]; then
         install_args+=("--accept-license")
     fi
-    # Prepare the final destination of the kernel modules and a staging directory 
-    # We will also setup some variables needed in the chroot 
-    # The precompiled kernel interfaces are first unpacked, and then re-linked using 
-    # the same linker that was used to build the precompiled modules 
+    # Prepare the final destination of the kernel modules
+    # For Flatcar 6.12.58, we use pre-built fully-linked .ko files from compilation
+    # No re-linking needed - modules were built in the correct environment
     mkdir -p ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}
-    local staging_dir=${base_dir}/staging/${KERNEL_VERSION}
-    mkdir -p ${staging_dir}
 
-    local pkg_name="nvidia-modules-${KERNEL_VERSION%%-*}${PACKAGE_TAG:+-${PACKAGE_TAG}}"
     local archive_dir=${base_dir}/precompiled/${KERNEL_VERSION}
-    # Note that mkprecompiled does not handle empty double-quotes;
-    # so don't wrap variables in double-quotes
-    ../mkprecompiled --unpack ${archive_dir}/${pkg_name} -o ${staging_dir}
-    cp ${archive_dir}/*.mod.o ${staging_dir}
-
-    # Re-link the modules using the host system's ld to avoid GLIBC version mismatches
-    # The bundled binutils from the developer container may require newer GLIBC than the host
-    cd ${staging_dir}
-    cp ../../nvidia/nv-kernel.o_binary .
-    cp ../../nvidia-modeset/nv-modeset-kernel.o_binary .
-    echo "Re-linking NVIDIA driver kernel modules..."
-    # Use host system's ld instead of bundled one
-    /usr/bin/ld -d -r -T ${base_dir}/module.lds -o nvidia.ko ./nv-linux.o ./nv-kernel.o_binary ./nvidia.mod.o
-    /usr/bin/ld -d -r -T ${base_dir}/module.lds -o nvidia-modeset.ko ./nv-modeset-linux.o ./nv-modeset-kernel.o_binary nvidia-modeset.mod.o
     
-
-    # Copy the kernel modules to their final destination and generate the module dependencies
-    cp ${staging_dir}/*.ko ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}
-    cp ${archive_dir}/modules.order ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}
+    # Copy the pre-built kernel modules directly
+    echo "Installing pre-built NVIDIA driver kernel modules..."
+    cp ${archive_dir}/*.ko ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}/
+    cp ${archive_dir}/modules.order ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}/
+    
+    # Copy modules.builtin files if they exist (needed by depmod)
+    if [ -f ${archive_dir}/modules.builtin ]; then
+        cp ${archive_dir}/modules.builtin ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}/
+    fi
+    if [ -f ${archive_dir}/modules.builtin.modinfo ]; then
+        cp ${archive_dir}/modules.builtin.modinfo ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}/
+    fi
+    
+    # Generate module dependencies
     depmod -b ${NVIDIA_KMODS_DIR} ${KERNEL_VERSION}
 }
 
