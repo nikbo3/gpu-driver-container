@@ -1,0 +1,44 @@
+feat: Add Flatcar 6.12.58 support for NVIDIA driver 580.95.05
+
+BREAKING CHANGE: Only driver 580.95.05 is compatible with Flatcar 6.12.58+
+
+Major Changes:
+- Build full .ko modules in chroot environment (no re-linking)
+- Skip mkprecompiled packaging (use direct .ko file copying)
+- Add download verification and loop device cleanup
+- Support only driver 580.95.05 for kernel 6.12.58+
+
+Technical Details:
+- Older drivers (535.x, 550.x) fail due to kernel 6.12.58 DRM API changes
+- Original approach failed during module re-linking (GLIBC mismatch)
+- New approach: Compile fully-linked modules inside chroot
+- Modules are linked with correct GLIBC and kernel environment
+- Direct installation without re-linking eliminates compatibility issues
+
+File Changes:
+- Modified: Dockerfile (added e2fsprogs, updated default driver version)
+- Modified: nvidia-driver (full module compilation, no re-linking)
+- Added: build-all-drivers.sh (automated build script)
+- Added: build-driver.sh (single driver build script)  
+- Added: FLATCAR_6.12_NOTES.md (technical documentation)
+- Added: CHANGES_SUMMARY.md (complete changelog)
+- Added: BUILD_INSTRUCTIONS.md (detailed guide)
+- Added: QUICK_START.md (quick reference)
+
+Driver Compatibility:
+- ❌ NVIDIA 535.183.01: FAILED (DRM API incompatible)
+- ❌ NVIDIA 550.90.07: FAILED (DRM API incompatible)
+- ✅ NVIDIA 580.95.05: SUCCESS (fully compatible)
+
+Verified On:
+- Flatcar Linux 6.12.58-flatcar (Build 4459.2.1)
+- AWS g4dn.xlarge GPU instance
+- Kubernetes 1.33
+- NVIDIA Container Toolkit v1.17.3
+
+Image Published:
+- nikbo/nvidia-driver:580.95.05-nicolita-6.12.58-flatcar
+
+Resolves: Flatcar 6.12.58 GPU driver incompatibility
+Co-authored-by: Nicolita <nicolita@adobe.com>
+

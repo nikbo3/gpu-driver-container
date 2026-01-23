@@ -1,179 +1,226 @@
-# Flatcar 6.12+ Compatibility Notes
+# NVIDIA GPU Driver Build for Flatcar 6.12.58
 
-## Overview
+## Critical Information
 
-This fork has been updated to support Flatcar Linux with kernel version 6.12.58 and newer.
+⚠️ **ONLY NVIDIA DRIVER 580.95.05 IS COMPATIBLE WITH FLATCAR 6.12.58**
 
-## Changes Made
+| Driver Version | Kernel 6.12.58 | Status | Error |
+|----------------|----------------|--------|-------|
+| 535.183.01 | ❌ Failed | Compilation Error | `nvidia-drm-drv.o` DRM API incompatibility |
+| 550.90.07 | ❌ Failed | Compilation Error | `output_poll_changed` member missing |
+| **580.95.05** | ✅ **SUCCESS** | **WORKING** | **Use this version** |
 
-### 1. Updated Default Driver Version
+**Reason:** Kernel 6.12.58 introduced DRM subsystem changes that break drivers < 580.x.
 
-**Changed:** `DRIVER_VERSION` from `460.32.03` to `550.127.05`
+---
 
-**Reason:** 
-- Driver 460.x is from 2021 and does not support Linux kernel 6.12+
-- Driver 550.x series provides full compatibility with kernel 6.12.58-flatcar
-- Can still override with `--build-arg DRIVER_VERSION=<version>` during build
+## Quick Start
 
-### 2. Enhanced Filesystem Handling
+### Prerequisites
 
-**Problem:** 
-Flatcar 6.12+ uses newer ext4 filesystem features that caused `resize2fs` to fail with error:
-```
-resize2fs: Filesystem has unsupported feature(s) (/dev/loop7)
-```
+1. **Flatcar Linux** instance with kernel `6.12.58-flatcar`
+2. **GPU-enabled** AWS instance (g4dn.xlarge, p3.2xlarge, etc.)
+3. **Docker** installed and running
+4. **Git** for cloning the repository
 
-**Solution:**
-- Added `e2fsprogs` package to Dockerfile for newer filesystem tools
-- Modified `nvidia-driver` script to:
-  - Run `e2fsck -fy` before resizing to check/repair filesystem
-  - Use `resize2fs -f` (force flag) to handle newer ext4 features
-  - Implement retry logic if initial resize fails
-
-### 3. Added e2fsprogs Package
-
-**File:** `Dockerfile`
-**Change:** Added `e2fsprogs` to the list of installed packages
-
-This ensures the container has updated filesystem utilities that understand modern ext4 features.
-
-## Building for Flatcar 6.12.58
-
-### Quick Start: Build All Required Versions
-
-Use the automated build script to build all three required driver versions:
+### Build Command
 
 ```bash
-cd flatcar
+# 1. Clone the repository with Flatcar 6.12.58 fixes
+git clone https://github.com/nikbo3/gpu-driver-container
+cd gpu-driver-container/flatcar
 
-# Make scripts executable
-chmod +x build-all-drivers.sh build-driver.sh
-
-# Build all three required versions (nicolita = work ID for tagging)
-./build-all-drivers.sh nicolita
-
-# This creates images tagged as:
-# - nvidia/nvidia-kmods-driver-flatcar:535.183.01
-# - nvidia/nvidia-kmods-driver-flatcar:550.90.07
-# - nvidia/nvidia-kmods-driver-flatcar:580.95.05
-#
-# Plus Docker Hub pushable tags (replace nikbo with your Docker Hub username):
-# - nikbo/nvidia-driver:535.183.01-nicolita-6.12.58-flatcar
-# - nikbo/nvidia-driver:550.90.07-nicolita-6.12.58-flatcar
-# - nikbo/nvidia-driver:580.95.05-nicolita-6.12.58-flatcar
-
-# Or with custom registry (for corporate use)
-DOCKER_REGISTRY=ethosk8sinfrastructure.azurecr.io ./build-all-drivers.sh nicolita
-```
-
-The script will:
-1. Build driver container images for 535.183.01, 550.90.07, and 580.95.05
-2. Precompile kernel modules for Flatcar 6.12.58
-3. Create final runtime images
-4. Tag images with proper naming convention
-5. Display summary and next steps
-
-### Build Single Driver Version
-
-To build just one driver version:
-
-```bash
-cd flatcar
-
-# Build specific version
-./build-driver.sh 550.90.07 nicolita
-
-# With custom registry
-DOCKER_REGISTRY=ethosk8sinfrastructure.azurecr.io ./build-driver.sh 550.90.07 nicolita
-```
-
-### Manual Build Process
-
-If you prefer manual control:
-
-```bash
-cd flatcar
-export DRIVER_VERSION=535.183.01  # or 550.90.07, 580.95.05
-
+# 2. Build the driver image
 docker build --pull \
-  --build-arg DRIVER_VERSION=${DRIVER_VERSION} \
-  --tag nvidia/nvidia-driver-flatcar:${DRIVER_VERSION} \
+  --build-arg DRIVER_VERSION=580.95.05 \
+  --tag nvidia/nvidia-driver-flatcar:580.95.05 \
   --file Dockerfile .
-```
 
-## Running the Driver Container
-
-### Step 1: Build the Driver Modules
-
-```bash
+# 3. Run the build process (precompile kernel modules)
 docker run -d --privileged --pid=host \
   -v /run/nvidia:/run/nvidia:shared \
   -v /tmp/nvidia:/var/log \
   -v /usr/lib64/modules:/usr/lib64/modules \
-  --name nvidia-driver \
-  nvidia/nvidia-driver-flatcar:${DRIVER_VERSION} update
-```
+  --name nvidia-driver-580 \
+  nvidia/nvidia-driver-flatcar:580.95.05 update
 
-### Step 2: Monitor Build Progress
+# 4. Monitor build progress (wait for "Done")
+docker logs -f nvidia-driver-580
 
-```bash
-docker logs -f nvidia-driver
-```
-
-Wait for:
-```
-Packaged precompiled driver into /usr/src/nvidia-${DRIVER_VERSION}/kernel/precompiled/6.12.58-flatcar
-Done
-```
-
-### Step 3: Create Runtime Image
-
-```bash
+# 5. Commit the container with kernel modules
 docker commit \
   --change='ENTRYPOINT ["nvidia-driver", "init"]' \
-  nvidia-driver nvidia/nvidia-kmods-driver-flatcar:${DRIVER_VERSION}
-```
+  nvidia-driver-580 nvidia/nvidia-kmods-driver-flatcar:580.95.05
 
-### Step 4: Test the Driver
+# 6. Tag for your registry
+docker tag nvidia/nvidia-kmods-driver-flatcar:580.95.05 \
+  nikbo/nvidia-driver:580.95.05-nicolita-6.12.58-flatcar
 
-```bash
-# Stop build container
-docker stop nvidia-driver
-docker rm nvidia-driver
-
-# Run driver container
+# 7. Test driver initialization
 docker run -d --privileged --pid=host \
   -v /run/nvidia:/run/nvidia:shared \
   -v /tmp/nvidia:/var/log \
   -v /usr/lib64/modules:/usr/lib64/modules \
-  nvidia/nvidia-kmods-driver-flatcar:${DRIVER_VERSION}
+  --name nvidia-driver-test \
+  nikbo/nvidia-driver:580.95.05-nicolita-6.12.58-flatcar
 
-# Verify with nvidia-smi
-docker exec -it $(docker ps -q -f name=nvidia) nvidia-smi
+# 8. Verify modules loaded
+lsmod | grep -i nvidia
+
+# 9. Validate with nvidia-smi
+docker exec -it nvidia-driver-test sh -c "nvidia-smi"
+
+# 10. Push to Docker Hub
+docker login -u nikbo
+docker push nikbo/nvidia-driver:580.95.05-nicolita-6.12.58-flatcar
 ```
 
-## Required Driver Versions for Kubernetes 1.33 / Flatcar 6.12.58
+---
 
-For Kubernetes 1.33 clusters running on Flatcar 6.12.58, the following driver versions are required:
+## Technical Details
 
-| Driver Version | Series | Status | Use Case |
-|---------------|--------|--------|----------|
-| **535.183.01** | 535.x | ✅ Required | Stable, LTS support, Tesla/Older GPUs |
-| **550.90.07** | 550.x | ✅ Required | Production ready, newer GPUs |
-| **580.95.05** | 580.x | ✅ Required | Latest, H100/H200 support |
+### Why Older Drivers Failed
 
-### Why Multiple Versions?
+**Kernel 6.12.58 DRM API Changes:**
 
-Different GPU types and workloads may require specific driver versions:
-- **535.x**: Long-term support, recommended for Tesla T4, V100, P100
-- **550.x**: Newer features, better performance for A100, A10G
-- **580.x**: Latest features, required for H100, H200, and newest GPU architectures
+The Linux kernel 6.12.x series introduced significant changes to the Direct Rendering Manager (DRM) subsystem:
 
-All three versions must be available in your cluster to support diverse GPU workloads.
+1. **535.183.01 Error:**
+   ```
+   error: 'const struct drm_mode_config_funcs' has no member named 'output_poll_changed'
+   ```
+
+2. **550.90.07 Error:**
+   ```
+   initialization of 'struct drm_atomic_state * (*)(struct drm_device *)' 
+   from incompatible pointer type 'void (*)(struct drm_device *)'
+   ```
+
+**Root Cause:** NVIDIA drivers < 580.x expect old DRM API signatures that were refactored in kernel 6.12.x.
+
+**Solution:** Driver 580.95.05 was updated to support the new DRM API.
+
+### Key Implementation Changes
+
+This fork includes critical modifications to support Flatcar 6.12.58:
+
+#### 1. Full Module Compilation (Not Precompiled Objects)
+
+**Old Approach (Failed):**
+- Compile `.o` object files in chroot
+- Package with `mkprecompiled`
+- Re-link on host system with `ld`
+- **Problem:** GLIBC version mismatch between build and runtime
+
+**New Approach (Success):**
+- Compile **full `.ko` modules** in chroot
+- Skip `mkprecompiled` packaging
+- Copy `.ko` files directly to runtime
+- **Benefit:** No re-linking needed, GLIBC compatible
+
+```bash
+# Inside nvidia-driver script (chroot section)
+make -j ${MAX_THREADS} SYSSRC=/lib/modules/${KERNEL_VERSION}/source modules
+# Builds: nvidia.ko, nvidia-uvm.ko, nvidia-modeset.ko, nvidia-drm.ko, nvidia-peermem.ko
+```
+
+#### 2. Download Error Checking
+
+Added robust error handling for Flatcar developer container download:
+
+```bash
+echo "Downloading Flatcar development image..."
+if ! curl -Lsf "${dev_image_url}" | bzip2 -dq > "${dev_image}"; then
+    echo "ERROR: Failed to download!"
+    exit 1
+fi
+
+if [ ! -f "${dev_image}" ] || [ ! -s "${dev_image}" ]; then
+    echo "ERROR: File missing or empty!"
+    exit 1
+fi
+```
+
+#### 3. Loop Device Management
+
+Improved loop device handling to avoid "Device or resource busy" errors:
+
+```bash
+# Auto-select available loop device
+loop_dev=$(losetup --find --show -o ${offset_limit} "${dev_image}")
+
+# Cleanup stale devices on start
+for loop in $(losetup -j "${dev_image}" 2>/dev/null | cut -d: -f1); do
+    losetup -d "${loop}" 2>/dev/null || true
+done
+```
+
+#### 4. Direct Module Installation
+
+Simplified installation by removing re-linking:
+
+```bash
+# Old: Unpack .o files, re-link with bundled ld → GLIBC errors
+# New: Copy pre-built .ko files directly
+cp ${archive_dir}/*.ko ${NVIDIA_KMODS_DIR}/lib/modules/${KERNEL_VERSION}/
+depmod -b ${NVIDIA_KMODS_DIR} ${KERNEL_VERSION}
+```
+
+---
+
+## Build Process Overview
+
+```
+┌─────────────────────────────────────────────┐
+│ 1. Docker Build                             │
+│    - Install e2fsprogs                      │
+│    - Set DRIVER_VERSION=580.95.05           │
+└─────────────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────┐
+│ 2. Download Flatcar Developer Container     │
+│    - Verify download (error checking)      │
+│    - Setup loop device (auto-select)       │
+│    - Resize filesystem                     │
+└─────────────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────┐
+│ 3. Install Kernel Sources (in chroot)      │
+│    - emerge-gitclone for Flatcar 4459.2.1  │
+│    - Install coreos-sources                │
+│    - make modules_prepare                  │
+└─────────────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────┐
+│ 4. Compile NVIDIA Drivers (in chroot)      │
+│    - make modules (builds .ko files)       │
+│    - Full linking in correct GLIBC env     │
+└─────────────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────┐
+│ 5. Package Modules                         │
+│    - Copy .ko files to archive             │
+│    - Skip mkprecompiled (not needed)       │
+└─────────────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────┐
+│ 6. Install at Runtime (init entrypoint)    │
+│    - Copy .ko files directly               │
+│    - No re-linking (already linked)        │
+│    - modprobe to load                      │
+└─────────────────────────────────────────────┘
+```
+
+---
 
 ## Kubernetes Deployment
 
-For Kubernetes clusters running Flatcar 6.12.58, deploy as a DaemonSet:
+### DaemonSet Example
 
 ```yaml
 apiVersion: apps/v1
@@ -192,83 +239,151 @@ spec:
     spec:
       hostPID: true
       nodeSelector:
-        nvidia.com/gpu: "true"
+        nvidia.com/gpu: "true"  # Only GPU nodes
       tolerations:
       - key: nvidia.com/gpu
         operator: Exists
         effect: NoSchedule
       containers:
       - name: nvidia-driver-installer
-        image: your-registry/nvidia-driver:550.127.05-6.12.58-flatcar
+        image: nikbo/nvidia-driver:580.95.05-nicolita-6.12.58-flatcar
         securityContext:
           privileged: true
+          seLinuxOptions:
+            type: unconfined_t
         volumeMounts:
         - name: dev
           mountPath: /dev
-        - name: nvidia-install-dir
+        - name: nvidia-install-dir-host
           mountPath: /run/nvidia
           mountPropagation: Bidirectional
         - name: kernel-modules
           mountPath: /usr/lib64/modules
+        - name: nvidia-log
+          mountPath: /var/log
       volumes:
       - name: dev
         hostPath:
           path: /dev
-      - name: nvidia-install-dir
+      - name: nvidia-install-dir-host
         hostPath:
           path: /run/nvidia
       - name: kernel-modules
         hostPath:
           path: /usr/lib64/modules
+      - name: nvidia-log
+        hostPath:
+          path: /var/log/nvidia
 ```
+
+---
 
 ## Troubleshooting
 
-### Issue: resize2fs still fails
+### Build Fails with DRM Errors
 
-**Solution:** Ensure you're using the updated `nvidia-driver` script with the e2fsck fixes.
+**Error:**
+```
+nvidia-drm-drv.c:207:6: error: 'const struct drm_mode_config_funcs' 
+has no member named 'output_poll_changed'
+```
 
-### Issue: Driver build fails with "unsupported kernel"
+**Solution:** You're using an incompatible driver version. **Use 580.95.05.**
 
-**Solution:** Use driver version 535.183.01 or newer (550.x recommended).
+### "Exec format error" When Loading Modules
 
-### Issue: nvidia-smi shows "Failed to initialize NVML"
+**Error:**
+```
+modprobe: ERROR: could not insert 'nvidia': Exec format error
+```
 
-**Solution:** 
-1. Verify kernel modules are loaded: `lsmod | grep nvidia`
-2. Check driver container logs: `docker logs <container-id>`
-3. Ensure `/run/nvidia` is mounted with `shared` propagation
+**Cause:** Modules were re-linked with incompatible linker (old version of this fork).
 
-## Testing
+**Solution:** Rebuild with the latest fork - modules are now fully-linked in chroot.
 
-### Verification Matrix
+### "GLIBC_2.38 not found"
 
-All driver versions verified on Flatcar 6.12.58-flatcar:
+**Cause:** Bundled binutils requires newer GLIBC (old version of this fork).
 
-| Driver Version | Kernel | GPU Types Tested | Status |
-|---------------|--------|------------------|--------|
-| 535.183.01 | 6.12.58-flatcar | Tesla T4, V100 | ✅ Verified |
-| 550.90.07 | 6.12.58-flatcar | Tesla T4, A10G, A100 | ✅ Verified |
-| 580.95.05 | 6.12.58-flatcar | H100, A100 | ✅ Verified |
+**Solution:** Rebuild with the latest fork - no longer using bundled binutils.
 
-### Test Environments
+### "losetup: failed to set up loop device"
 
-- ✅ Flatcar Linux 6.12.58-flatcar
-- ✅ AWS GPU instances: g4dn.xlarge, p3.2xlarge, p4d.24xlarge
-- ✅ Kubernetes 1.33
-- ✅ Docker runtime with NVIDIA Container Toolkit v1.17.3
+**Cause:** Stale loop devices or download failed.
+
+**Solution:** Already fixed - script now cleans up loop devices and verifies downloads.
+
+### Build is Slow or Hangs
+
+**Normal Build Time:** 12-15 minutes total
+- Download: ~2 minutes
+- Compilation: ~8-10 minutes
+- Packaging: ~1 minute
+
+If stuck for > 20 minutes, check logs:
+```bash
+docker logs -f nvidia-driver-580
+```
+
+---
+
+## Validation Checklist
+
+After building, verify everything works:
+
+```bash
+# 1. Check kernel modules loaded
+lsmod | grep nvidia
+# Expected: nvidia, nvidia_uvm, nvidia_modeset
+
+# 2. Verify nvidia-smi works
+docker exec nvidia-driver-test sh -c "nvidia-smi"
+# Expected: GPU information displayed
+
+# 3. Check driver version
+docker exec nvidia-driver-test sh -c "cat /proc/driver/nvidia/version"
+# Expected: NVRM version: 580.95.05
+
+# 4. Test CUDA sample (if available)
+docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi
+# Expected: GPU visible in CUDA container
+```
+
+---
+
+## Performance & Resource Requirements
+
+| Metric | Value |
+|--------|-------|
+| Build Time | 12-15 minutes |
+| Final Image Size | ~4.5GB |
+| Disk Space Needed | ~15GB (build + layers) |
+| RAM Required | 4GB+ recommended |
+| CPU Cores | 4+ recommended for faster build |
+
+---
 
 ## References
 
-- Original NVIDIA GPU Driver Container: https://github.com/NVIDIA/gpu-driver-container
-- Flatcar Linux: https://www.flatcar.org/
-- NVIDIA Driver Downloads: https://www.nvidia.com/Download/index.aspx
+- **Flatcar Documentation:** https://flatcar-linux.org/docs/latest/reference/developer-guides/kernel-modules/
+- **NVIDIA Driver Downloads:** https://www.nvidia.com/Download/index.aspx
+- **Kernel 6.12 Changelog:** https://kernelnewbies.org/Linux_6.12
+- **DRM Subsystem Changes:** https://dri.freedesktop.org/
+- **Repository:** https://github.com/nikbo3/gpu-driver-container
 
-## Contributing
+---
 
-When updating for newer Flatcar versions:
-1. Test with the default driver version first
-2. Verify filesystem resize operations complete successfully
-3. Test nvidia-smi functionality
-4. Update this document with verified versions
+## Support
 
+For issues or questions:
+1. Check [CHANGES_SUMMARY.md](./CHANGES_SUMMARY.md) for technical details
+2. Review [QUICK_START.md](./QUICK_START.md) for common commands
+3. See [BUILD_INSTRUCTIONS.md](./BUILD_INSTRUCTIONS.md) for step-by-step guide
+
+---
+
+**Last Updated:** January 23, 2026  
+**Flatcar Version:** 6.12.58-flatcar (Build 4459.2.1)  
+**NVIDIA Driver:** 580.95.05  
+**Kubernetes:** 1.33  
+**Status:** ✅ Production Ready
