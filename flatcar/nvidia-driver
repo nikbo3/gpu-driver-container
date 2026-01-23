@@ -285,12 +285,10 @@ _create_driver_package() (
     echo "Using pre-built kernel modules (skipping mkprecompiled for Flatcar 6.12.58+)"
     # Archive the fully-linked kernel modules
     # For Flatcar 6.12.58, we keep the .ko files to avoid re-linking issues
-    # The archive is created one per kernel version, including the package created above
-    # and the corresponding module files
+    # No mkprecompiled package to move - we're archiving .ko files directly
     local archive_dir=precompiled/${KERNEL_VERSION}
     mkdir -p "${archive_dir}"
-    mv "${pkg_name}" "${archive_dir}"
-    local kmods="nvidia nvidia-uvm nvidia-modeset nvidia-drm"
+    local kmods="nvidia nvidia-uvm nvidia-modeset nvidia-drm nvidia-peermem"
     for m in $kmods; do
        # Keep both .ko and .mod.o files
        if [ -f ${m}.ko ]; then
