@@ -112,9 +112,19 @@ _install_development_env() {
     # Step 5: Set up loop device with offset (but don't mount yet)
     # Use --find to automatically get an available loop device instead of hardcoding loop7
     echo "Setting up loop device with offset (offset_limit=${offset_limit})..."
+    echo "DEBUG: About to run losetup..."
+    echo "DEBUG: Command will be: losetup --find --show -o ${offset_limit} ${abs_dev_image}"
+    echo "DEBUG: File check before losetup:"
+    stat "${abs_dev_image}" 2>&1 || echo "stat failed!"
+    echo "DEBUG: Current loop devices before setup:"
+    losetup -a 2>&1 || echo "No loop devices or losetup -a failed"
+    
+    echo "DEBUG: Running losetup now..."
     local loop_dev
     loop_dev=$(losetup --find --show -o ${offset_limit} "${abs_dev_image}" 2>&1)
     local losetup_status=$?
+    echo "DEBUG: losetup completed with exit code: ${losetup_status}"
+    echo "DEBUG: losetup output: '${loop_dev}'"
     
     if [ ${losetup_status} -ne 0 ] || [ -z "${loop_dev}" ]; then
         echo "ERROR: Failed to set up loop device!"
