@@ -100,8 +100,6 @@ _install_development_env() {
         echo "Using image file: ${abs_dev_image}"
         echo "File verification:"
         ls -lh "${abs_dev_image}"
-        echo "File type:"
-        file "${abs_dev_image}"
     else
         echo "ERROR: Development image file not found in current directory!"
         echo "Looking for: ${dev_image}"
