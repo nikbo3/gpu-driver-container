@@ -1,0 +1,30 @@
+--- a/kernel/nvidia-drm/nvidia-drm-connector.c
++++ b/kernel/nvidia-drm/nvidia-drm-connector.c
+@@ -30,6 +30,15 @@
+ 
+ #include <linux/version.h>
+ 
++/*
++ * Kernel 6.12+ compatibility patch
++ * The output_poll_changed callback was removed from drm_mode_config_funcs
++ * Hotplug is now handled automatically by drm_client_dev_hotplug()
++ */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
++#define NV_DRM_HAS_OUTPUT_POLL_CHANGED 0
++#else
++#define NV_DRM_HAS_OUTPUT_POLL_CHANGED 1
++#endif
++
+ static void nv_drm_connector_destroy(struct drm_connector *connector)
+ {
+@@ -XXX,7 +XXX,9 @@ static const struct drm_mode_config_funcs nv_mode_config_funcs = {
+     .fb_create = nvidia_drm_framebuffer_create,
+     .atomic_check = nvidia_drm_atomic_check,
+     .atomic_commit = nvidia_drm_atomic_commit,
++#if NV_DRM_HAS_OUTPUT_POLL_CHANGED
+     .output_poll_changed = nvidia_drm_output_poll_changed,
++#endif
+ };
+ 
+ /*
+
