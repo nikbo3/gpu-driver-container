@@ -230,6 +230,16 @@ _install_prerequisites() (
 
     _install_development_env 
     echo "Installing the Flatcar kernel sources into the development environment..."
+    
+    # Copy patches into the chroot environment so they're accessible inside
+    echo "Copying kernel compatibility patches into chroot environment..."
+    if [ -d /patches ]; then
+        mkdir -p /mnt/coreos/patches
+        cp -r /patches/* /mnt/coreos/patches/ || echo "Warning: Failed to copy patches"
+        ls -la /mnt/coreos/patches/ || echo "Patches directory empty or not accessible"
+    else
+        echo "Warning: /patches directory not found in container!"
+    fi
 
     cat <<'EOF' | chroot /mnt/coreos /bin/bash
 set -x  # Enable debug output
