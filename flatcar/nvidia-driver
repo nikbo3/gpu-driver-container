@@ -88,24 +88,48 @@ _install_development_env() {
         exit 1
     fi
     
-    # Get absolute path to avoid any issues with relative paths
-    local abs_dev_image
-    abs_dev_image="$(pwd)/${dev_image}"
-    echo "Using image file: ${abs_dev_image}"
+    # Step 4: Verify file exists and get its real absolute path
+    echo "Current working directory: $(pwd)"
+    echo "Files in current directory:"
+    ls -lah | grep flatcar || echo "No flatcar files found"
     
-    # Step 4: Set up loop device with offset (but don't mount yet)
-    # Use --find to automatically get an available loop device instead of hardcoding loop7
-    echo "Setting up loop device with offset..."
-    local loop_dev
-    loop_dev=$(losetup --find --show -o ${offset_limit} "${abs_dev_image}")
-    if [ -z "${loop_dev}" ]; then
-        echo "ERROR: Failed to set up loop device!"
-        echo "Attempted to use image: ${abs_dev_image}"
-        echo "File check:"
-        ls -lh "${abs_dev_image}" 2>/dev/null || echo "File not found"
+    # Get absolute path - the file should be in current directory
+    local abs_dev_image
+    if [ -f "${dev_image}" ]; then
+        abs_dev_image="$(realpath ${dev_image})"
+        echo "Using image file: ${abs_dev_image}"
+        echo "File verification:"
+        ls -lh "${abs_dev_image}"
+        echo "File type:"
+        file "${abs_dev_image}"
+    else
+        echo "ERROR: Development image file not found in current directory!"
+        echo "Looking for: ${dev_image}"
+        echo "Current directory: $(pwd)"
+        echo "Files present:"
+        ls -la
         exit 1
     fi
-    echo "Using loop device: ${loop_dev}"
+    
+    # Step 5: Set up loop device with offset (but don't mount yet)
+    # Use --find to automatically get an available loop device instead of hardcoding loop7
+    echo "Setting up loop device with offset (offset_limit=${offset_limit})..."
+    local loop_dev
+    loop_dev=$(losetup --find --show -o ${offset_limit} "${abs_dev_image}" 2>&1)
+    local losetup_status=$?
+    
+    if [ ${losetup_status} -ne 0 ] || [ -z "${loop_dev}" ]; then
+        echo "ERROR: Failed to set up loop device!"
+        echo "losetup exit code: ${losetup_status}"
+        echo "losetup output: ${loop_dev}"
+        echo "Attempted to use image: ${abs_dev_image}"
+        echo "File verification:"
+        ls -lh "${abs_dev_image}" 2>/dev/null || echo "File not found"
+        echo "Available loop devices:"
+        losetup -a
+        exit 1
+    fi
+    echo "Successfully created loop device: ${loop_dev}"
     
     # Step 3: Resize the filesystem
     # Note: Skipping e2fsck because Flatcar 6.12.58 uses FEATURE_C12 (orphan_file)
