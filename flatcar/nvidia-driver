@@ -34,7 +34,15 @@ _install_development_env() {
 
     # Clean up any stale loop devices from previous failed runs
     echo "Cleaning up any existing loop devices for this image..."
-    for loop in $(losetup -j "${dev_image}" 2>/dev/null | cut -d: -f1); do
+    # First cleanup: Try to detach any loop devices using an absolute path to this file
+    local abs_image_path="$(pwd)/${dev_image}"
+    for loop in $(losetup -a 2>/dev/null | grep "${abs_image_path}" | cut -d: -f1); do
+        echo "Detaching stale loop device: ${loop}"
+        losetup -d "${loop}" 2>/dev/null || true
+    done
+    
+    # Also try with just the filename pattern in case of relative paths
+    for loop in $(losetup -a 2>/dev/null | grep "${dev_image}" | cut -d: -f1); do
         echo "Detaching stale loop device: ${loop}"
         losetup -d "${loop}" 2>/dev/null || true
     done
@@ -112,11 +120,19 @@ _install_development_env() {
     # Step 5: Set up loop device with offset (but don't mount yet)
     # Use --find to automatically get an available loop device instead of hardcoding loop7
     echo "Setting up loop device with offset (offset_limit=${offset_limit})..."
+    
+    # Final cleanup: Detach any loop devices still pointing to this file
+    echo "Final cleanup of any remaining stale loop devices..."
+    for loop in $(losetup -a 2>/dev/null | grep "${abs_dev_image}" | cut -d: -f1); do
+        echo "Detaching: ${loop}"
+        losetup -d "${loop}" 2>/dev/null || true
+    done
+    
     echo "DEBUG: About to run losetup..."
     echo "DEBUG: Command will be: losetup --find --show -o ${offset_limit} ${abs_dev_image}"
     echo "DEBUG: File check before losetup:"
     stat "${abs_dev_image}" 2>&1 || echo "stat failed!"
-    echo "DEBUG: Current loop devices before setup:"
+    echo "DEBUG: Current loop devices after cleanup:"
     losetup -a 2>&1 || echo "No loop devices or losetup -a failed"
     
     echo "DEBUG: Running losetup now..."
