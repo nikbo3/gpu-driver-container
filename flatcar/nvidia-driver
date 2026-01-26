@@ -75,19 +75,36 @@ _install_development_env() {
     
     # Step 2: Add space to the image file BEFORE setting up loop device
     echo "Adding space to development image..."
-    dd if=/dev/zero bs=1MiB of="${dev_image}" conv=notrunc oflag=append count=3000
-    
-    # Step 3: Verify file still exists after dd
-    if [ ! -f "${dev_image}" ]; then
-        echo "ERROR: Development image file disappeared after dd!"
+    if ! dd if=/dev/zero bs=1MiB of="${dev_image}" conv=notrunc oflag=append count=3000; then
+        echo "ERROR: Failed to add space to development image!"
         exit 1
     fi
+    echo "Development image size after adding space: $(du -h ${dev_image} | cut -f1)"
+    
+    # Step 3: Verify file still exists after dd and get absolute path
+    if [ ! -f "${dev_image}" ]; then
+        echo "ERROR: Development image file disappeared after dd!"
+        ls -la . 2>/dev/null || true
+        exit 1
+    fi
+    
+    # Get absolute path to avoid any issues with relative paths
+    local abs_dev_image
+    abs_dev_image="$(pwd)/${dev_image}"
+    echo "Using image file: ${abs_dev_image}"
     
     # Step 4: Set up loop device with offset (but don't mount yet)
     # Use --find to automatically get an available loop device instead of hardcoding loop7
     echo "Setting up loop device with offset..."
     local loop_dev
-    loop_dev=$(losetup --find --show -o ${offset_limit} "${dev_image}")
+    loop_dev=$(losetup --find --show -o ${offset_limit} "${abs_dev_image}")
+    if [ -z "${loop_dev}" ]; then
+        echo "ERROR: Failed to set up loop device!"
+        echo "Attempted to use image: ${abs_dev_image}"
+        echo "File check:"
+        ls -lh "${abs_dev_image}" 2>/dev/null || echo "File not found"
+        exit 1
+    fi
     echo "Using loop device: ${loop_dev}"
     
     # Step 3: Resize the filesystem
