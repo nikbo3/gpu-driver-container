@@ -206,6 +206,34 @@ echo "=== Checking NVIDIA sources ==="
 ls -la /usr/src/ || echo "Failed to list /usr/src/"
 ls -la /usr/src/nvidia-*/kernel 2>/dev/null || echo "NVIDIA kernel directory not found"
 
+echo "=== Applying kernel compatibility patches ==="
+cd /usr/src/nvidia-*/kernel || {
+    echo "ERROR: Failed to cd to NVIDIA kernel directory for patching!"
+    exit 1
+}
+
+# Apply follow_pfn -> follow_pte patch for kernel 6.5+
+if [ -f /patches/kernel-6.5-follow-pte.patch ]; then
+    echo "Applying kernel 6.5+ follow_pte patch..."
+    patch -p2 < /patches/kernel-6.5-follow-pte.patch || {
+        echo "Warning: follow_pte patch failed, attempting to continue..."
+    }
+else
+    echo "Warning: kernel-6.5-follow-pte.patch not found"
+fi
+
+# Apply DRM output_poll_changed removal patch for kernel 6.12+
+if [ -f /patches/kernel-6.12-drm-poll.patch ]; then
+    echo "Applying kernel 6.12+ DRM poll patch..."
+    patch -p2 < /patches/kernel-6.12-drm-poll.patch || {
+        echo "Warning: DRM poll patch failed, attempting to continue..."
+    }
+else
+    echo "Warning: kernel-6.12-drm-poll.patch not found"
+fi
+
+echo "=== Patches applied, proceeding with compilation ==="
+
 echo "=== Compiling NVIDIA driver kernel modules with $(gcc --version | head -1) ==="
 
 # Copy module.lds if it exists (not present in all kernel versions)

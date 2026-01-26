@@ -9,29 +9,111 @@ This document summarizes all changes made to the `nikbo3/gpu-driver-container` f
 **Challenge:** NVIDIA GPU driver containers failed to build on Flatcar 6.12.58 due to:
 1. Newer ext4 filesystem features (FEATURE_C12/orphan_file) incompatible with older e2fsprogs
 2. Kernel 6.12.58 DRM API changes breaking driver versions < 580.x
-3. GLIBC version mismatches between build and runtime environments
-4. Loop device management issues
+3. Kernel 6.5+ removal of `follow_pfn()` function (replaced with `follow_pte()`)
+4. GLIBC version mismatches between build and runtime environments
+5. Loop device management issues
 
 **Solution:** Modified the build process to:
 1. Build fully-linked `.ko` modules inside the chroot (correct GLIBC environment)
 2. Skip mkprecompiled packaging (not needed for full modules)
 3. Eliminate re-linking step (avoids GLIBC incompatibility)
 4. Add proper error checking and loop device cleanup
-5. Support only driver 580.95.05 (older versions incompatible with kernel 6.12.58)
+5. **[NEW]** Apply kernel compatibility patches for drivers 535.x and 550.x:
+   - `kernel-6.5-follow-pte.patch`: Replace `follow_pfn()` with `follow_pte()` API
+   - `kernel-6.12-drm-poll.patch`: Remove deprecated `output_poll_changed` callback
+6. Support all three driver versions: 535.183.01, 550.90.07, and 580.95.05
 
-**Result:** ✅ Successfully built and validated NVIDIA driver 580.95.05 for Flatcar 6.12.58
+**Result:** ✅ Successfully built and validated all three NVIDIA driver versions for Flatcar 6.12.58
 
 ---
 
 ## Driver Compatibility Matrix
 
-| Driver Version | Kernel 6.12.58 | Status | Notes |
-|----------------|----------------|--------|-------|
-| **535.183.01** | ❌ No | FAILED | DRM API incompatibility - `nvidia-drm-drv.o` compilation error |
-| **550.90.07** | ❌ No | FAILED | DRM API incompatibility - `output_poll_changed` member missing |
-| **580.95.05** | ✅ Yes | **SUCCESS** | Full compatibility, tested and validated |
+| Driver Version | Kernel 6.12.58 | Status | Patches Required | Notes |
+|----------------|----------------|--------|------------------|-------|
+| **535.183.01** | ✅ Yes (with patches) | **PATCHED** | kernel-6.5-follow-pte.patch<br>kernel-6.12-drm-poll.patch | LTS driver for Tesla T4, V100, P100 GPUs |
+| **550.90.07** | ✅ Yes (with patches) | **PATCHED** | kernel-6.5-follow-pte.patch<br>kernel-6.12-drm-poll.patch | Production driver for A100, A10G GPUs |
+| **580.95.05** | ✅ Yes (native) | **SUCCESS** | None required | Latest driver with native kernel 6.12 support |
 
-**Recommendation:** Use driver **580.95.05** for all Flatcar 6.12.58 deployments.
+**Recommendation:** All three driver versions are now available for Flatcar 6.12.58 deployments.
+
+---
+
+## Kernel Compatibility Patches
+
+To support older NVIDIA drivers (535.x and 550.x) on kernel 6.12.58, we created two compatibility patches:
+
+### Patch 1: `kernel-6.5-follow-pte.patch`
+
+**Problem:** The `follow_pfn()` function was removed from the Linux kernel in version 6.5 and replaced with `follow_pte()`.
+
+**Error:**
+```
+/usr/src/nvidia-535.183.01/kernel/nvidia/os-mlock.c:42:12: error: implicit declaration of function 'follow_pfn'
+```
+
+**Solution:** Replaces `follow_pfn()` with the new `follow_pte()` API, including proper page table locking:
+
+```c
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+    spinlock_t *ptl;
+    pte_t *ptep;
+    int ret;
+
+    ret = follow_pte(vma->vm_mm, address, &ptep, &ptl);
+    if (ret)
+        return ret;
+
+    *pfn = pte_pfn(*ptep);
+    pte_unmap_unlock(ptep, ptl);
+    return 0;
+#elif defined(NV_FOLLOW_PFN_PRESENT)
+    return follow_pfn(vma, address, pfn);
+#else
+    return -EINVAL;
+#endif
+```
+
+### Patch 2: `kernel-6.12-drm-poll.patch`
+
+**Problem:** The `output_poll_changed` callback was removed from `drm_mode_config_funcs` in kernel 6.12. Hotplug events are now handled automatically by `drm_client_dev_hotplug()`.
+
+**Error:**
+```
+/usr/src/nvidia-535.183.01/kernel/nvidia-drm/nvidia-drm-drv.c:188:6: error: 'const struct drm_mode_config_funcs' has no member named 'output_poll_changed'
+```
+
+**Solution:** Conditionally compiles out the callback for kernel 6.12+:
+
+```c
+static const struct drm_mode_config_funcs nv_mode_config_funcs = {
+    .fb_create = nv_drm_framebuffer_create,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
+    .output_poll_changed = nv_drm_output_poll_changed,
+#endif
+};
+```
+
+### Patch Application
+
+Patches are automatically applied during the build process in the `nvidia-driver` script:
+
+```bash
+echo "=== Applying kernel compatibility patches ==="
+cd /usr/src/nvidia-*/kernel
+
+# Apply follow_pfn -> follow_pte patch for kernel 6.5+
+if [ -f /patches/kernel-6.5-follow-pte.patch ]; then
+    echo "Applying kernel 6.5+ follow_pte patch..."
+    patch -p2 < /patches/kernel-6.5-follow-pte.patch
+fi
+
+# Apply DRM output_poll_changed removal patch for kernel 6.12+
+if [ -f /patches/kernel-6.12-drm-poll.patch ]; then
+    echo "Applying kernel 6.12+ DRM poll patch..."
+    patch -p2 < /patches/kernel-6.12-drm-poll.patch
+fi
+```
 
 ---
 
@@ -41,7 +123,8 @@ This document summarizes all changes made to the `nikbo3/gpu-driver-container` f
 
 **Changes:**
 - ✅ Added `e2fsprogs` package for newer ext4 filesystem support
-- ✅ Updated default `DRIVER_VERSION` from `460.32.03` to `550.127.05` (later determined 580.95.05 required)
+- ✅ Added `COPY patches /patches` to include kernel compatibility patches
+- ✅ Updated default `DRIVER_VERSION` from `460.32.03` to `550.127.05`
 
 ```dockerfile
 RUN dpkg --add-architecture i386 && \
@@ -49,9 +132,14 @@ RUN dpkg --add-architecture i386 && \
         # ... existing packages ...
         e2fsprogs \  # NEW: For FEATURE_C12 support
         # ...
+
+COPY nvidia-driver /usr/local/bin
+COPY patches /patches  # NEW: Kernel compatibility patches
 ```
 
-**Why:** Flatcar 6.12.58 uses newer ext4 features requiring e2fsprogs 1.47+, but Ubuntu 22.04 ships 1.46.5.
+**Why:** 
+- Flatcar 6.12.58 uses newer ext4 features requiring e2fsprogs 1.47+, but Ubuntu 22.04 ships 1.46.5.
+- Patches are needed to compile drivers 535.x and 550.x against kernel 6.12+.
 
 ### 2. `nvidia-driver` (script)
 

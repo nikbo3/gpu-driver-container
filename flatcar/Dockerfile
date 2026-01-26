@@ -66,6 +66,7 @@ RUN cd /tmp && \
     rm -rf /tmp/*
 
 COPY nvidia-driver /usr/local/bin
+COPY patches /patches
 
 WORKDIR /usr/src/nvidia-$DRIVER_VERSION
 
