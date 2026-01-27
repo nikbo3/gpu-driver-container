@@ -5,7 +5,7 @@
      return unsafe_follow_pfn(vma, address, pfn);
  #else
 -    return follow_pfn(vma, address, pfn);
-+    return follow_pte(vma, address, pfn);
++    return unsafe_follow_pfn(vma, address, pfn);
  #endif
  }
 
