@@ -290,9 +290,20 @@ cd /usr/src/nvidia-*/kernel || {
 # Apply follow_pfn -> follow_pte patch for kernel 6.5+
 if [ -f /patches/kernel-6.5-follow-pte.patch ]; then
     echo "Applying kernel 6.5+ follow_pte patch..."
-    patch -p2 < /patches/kernel-6.5-follow-pte.patch || {
-        echo "Warning: follow_pte patch failed, attempting to continue..."
-    }
+    echo "DEBUG: Current directory: $(pwd)"
+    echo "DEBUG: Patch file contents:"
+    cat /patches/kernel-6.5-follow-pte.patch
+    echo "DEBUG: Target file before patch:"
+    grep -A 3 -B 3 "follow_pfn" nvidia/os-mlock.c || echo "Pattern not found in file"
+    if patch --dry-run -p2 < /patches/kernel-6.5-follow-pte.patch; then
+        echo "DEBUG: Dry-run succeeded, applying patch..."
+        patch -p2 < /patches/kernel-6.5-follow-pte.patch
+        echo "DEBUG: Patch applied successfully"
+    else
+        echo "ERROR: Patch dry-run failed! Exit code: $?"
+        echo "Attempting to apply anyway..."
+        patch -p2 < /patches/kernel-6.5-follow-pte.patch || echo "Patch failed!"
+    fi
 else
     echo "Warning: kernel-6.5-follow-pte.patch not found"
 fi
@@ -300,9 +311,19 @@ fi
 # Apply DRM output_poll_changed removal patch for kernel 6.12+
 if [ -f /patches/kernel-6.12-drm-poll.patch ]; then
     echo "Applying kernel 6.12+ DRM poll patch..."
-    patch -p2 < /patches/kernel-6.12-drm-poll.patch || {
-        echo "Warning: DRM poll patch failed, attempting to continue..."
-    }
+    echo "DEBUG: Patch file contents:"
+    cat /patches/kernel-6.12-drm-poll.patch
+    echo "DEBUG: Target file before patch:"
+    grep -A 2 -B 2 "output_poll_changed" nvidia-drm/nvidia-drm-drv.c || echo "Pattern not found in file"
+    if patch --dry-run -p2 < /patches/kernel-6.12-drm-poll.patch; then
+        echo "DEBUG: Dry-run succeeded, applying patch..."
+        patch -p2 < /patches/kernel-6.12-drm-poll.patch
+        echo "DEBUG: Patch applied successfully"
+    else
+        echo "ERROR: Patch dry-run failed! Exit code: $?"
+        echo "Attempting to apply anyway..."
+        patch -p2 < /patches/kernel-6.12-drm-poll.patch || echo "Patch failed!"
+    fi
 else
     echo "Warning: kernel-6.12-drm-poll.patch not found"
 fi
