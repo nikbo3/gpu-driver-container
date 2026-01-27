@@ -1,11 +1,11 @@
 --- a/kernel/nvidia/os-mlock.c
 +++ b/kernel/nvidia/os-mlock.c
-@@ -39,7 +39,7 @@
- #if defined(NV_FOLLOW_PFN_PRESENT)
- static int __nv_follow_pfn(struct vm_area_struct *vma, unsigned long address,
-                             unsigned long *pfn) {
+@@ -32,7 +32,7 @@
+ #if defined(NV_UNSAFE_FOLLOW_PFN_PRESENT)
+     return unsafe_follow_pfn(vma, address, pfn);
+ #else
 -    return follow_pfn(vma, address, pfn);
 +    return follow_pte(vma, address, pfn);
+ #endif
  }
- #else
- static int __nv_follow_pfn(struct vm_area_struct *vma, unsigned long address,
+
