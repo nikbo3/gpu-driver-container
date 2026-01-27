@@ -1,6 +1,6 @@
 --- a/kernel/nvidia/os-mlock.c
 +++ b/kernel/nvidia/os-mlock.c
-@@ -27,13 +27,17 @@
+@@ -35,10 +35,12 @@
  static inline int nv_follow_pfn(struct vm_area_struct *vma,
                                  unsigned long address,
                                  unsigned long *pfn)
@@ -11,8 +11,6 @@
 +#elif defined(NV_FOLLOW_PFN_PRESENT)
      return follow_pfn(vma, address, pfn);
 +#else
-+    /* Kernel 6.5+ removed follow_pfn - graceful fallback */
 +    return -1;
  #endif
  }
-
